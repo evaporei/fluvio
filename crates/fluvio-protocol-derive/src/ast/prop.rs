@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
 use syn::spanned::Spanned;
-use syn::{Attribute, Error, Field, Lit, Meta, NestedMeta, Type};
+use syn::{Attribute, Error, Expr, Field, Lit, MetaList, MetaNameValue, Type};
 
 #[derive(Clone)]
 pub(crate) struct NamedProp {
@@ -191,33 +191,43 @@ impl PropAttrs {
 
         // Find all supported field level attributes in one go.
         for attribute in attrs.iter() {
-            if attribute.path.is_ident("varint") {
+            if attribute.path().is_ident("varint") {
                 prop_attrs.varint = true;
-            } else if attribute.path.is_ident("fluvio") {
-                if let Ok(Meta::List(list)) = attribute.parse_meta() {
-                    for kf_attr in list.nested {
-                        if let NestedMeta::Meta(Meta::NameValue(name_value)) = kf_attr {
-                            if name_value.path.is_ident("min_version") {
-                                if let Lit::Int(lit_int) = name_value.lit {
+            } else if attribute.path().is_ident("fluvio") {
+                attribute.parse_nested_meta(|meta| {
+                    let value = meta.value()?;
+                    let list: MetaList = value.parse()?;
+                    list.parse_nested_meta(|kf_attr| {
+                        let value = kf_attr.value()?;
+                        let name_value: MetaNameValue = value.parse()?;
+                        if name_value.path.is_ident("min_version") {
+                            if let Expr::Lit(expr_lit) = name_value.value {
+                                if let Lit::Int(lit_int) = expr_lit.lit {
                                     prop_attrs.min_version = lit_int.base10_parse::<i16>()?;
                                 }
-                            } else if name_value.path.is_ident("max_version") {
-                                if let Lit::Int(lit_int) = name_value.lit {
+                            }
+                        } else if name_value.path.is_ident("max_version") {
+                            if let Expr::Lit(expr_lit) = name_value.value {
+                                if let Lit::Int(lit_int) = expr_lit.lit {
                                     prop_attrs.max_version = Some(lit_int.base10_parse::<i16>()?);
                                 }
-                            } else if name_value.path.is_ident("default") {
-                                if let Lit::Str(lit_str) = name_value.lit {
+                            }
+                        } else if name_value.path.is_ident("default") {
+                            if let Expr::Lit(expr_lit) = name_value.value {
+                                if let Lit::Str(lit_str) = expr_lit.lit {
                                     prop_attrs.default_value = Some(lit_str.value());
                                 }
-                            } else {
-                                tracing::warn!(
-                                    "#[fluvio({})] does nothing here.",
-                                    name_value.to_token_stream().to_string(),
-                                )
                             }
+                        } else {
+                            tracing::warn!(
+                                "#[fluvio({})] does nothing here.",
+                                name_value.to_token_stream().to_string(),
+                            );
                         }
-                    }
-                }
+                        Ok(())
+                    })?;
+                    Ok(())
+                })?;
             }
         }
 

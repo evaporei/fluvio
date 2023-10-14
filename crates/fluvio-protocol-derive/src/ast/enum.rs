@@ -4,7 +4,7 @@ use quote::quote;
 use syn::spanned::Spanned;
 use syn::{
     Error, Expr, ExprLit, ExprUnary, Fields, FieldsNamed, FieldsUnnamed, Generics, Ident, ItemEnum,
-    Lit, Meta, NestedMeta, Variant,
+    Lit, MetaList, MetaNameValue, Variant,
 };
 
 use super::container::ContainerAttributes;
@@ -68,18 +68,26 @@ impl EnumProp {
         prop.variant_name = variant_ident.to_string();
         // Find all supported field level attributes in one go.
         for attribute in &variant.attrs {
-            if attribute.path.is_ident("fluvio") {
-                if let Ok(Meta::List(list)) = attribute.parse_meta() {
-                    for kf_attr in list.nested {
-                        if let NestedMeta::Meta(Meta::NameValue(name_value)) = kf_attr {
-                            if name_value.path.is_ident("tag") {
-                                if let Lit::Int(lit_int) = name_value.lit {
+            if attribute.path().is_ident("fluvio") {
+                // if let Ok(Meta::List(list)) = attribute.parse_meta() {
+                attribute.parse_nested_meta(|meta| {
+                    let value = meta.value()?;
+                    let list: MetaList = value.parse()?;
+                    list.parse_nested_meta(|kf_attr| {
+                        let value = kf_attr.value()?;
+                        let name_value: MetaNameValue = value.parse()?;
+                        // if let NestedMeta::Meta(Meta::NameValue(name_value)) = kf_attr {
+                        if name_value.path.is_ident("tag") {
+                            if let Expr::Lit(expr_lit) = name_value.value {
+                                if let Lit::Int(lit_int) = expr_lit.lit {
                                     prop.tag = Some(lit_int.base10_digits().to_owned());
                                 }
                             }
                         }
-                    }
-                }
+                        Ok(())
+                    })?;
+                    Ok(())
+                })?;
             }
         }
 
